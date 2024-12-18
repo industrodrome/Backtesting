@@ -1,0 +1,137 @@
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+
+# Fetch daily data for TATACONSUM.NS from yfinance
+ticker = 'TATACONSUM.NS'
+start_date = '2022-01-01'
+end_date = '2024-08-01'
+
+# Fetch the data
+data = yf.download(ticker, start=start_date, end=end_date)
+
+# Prepare the data (similar to the previous code)
+data['Date'] = data.index
+data.reset_index(drop=True, inplace=True)
+
+# Calculate daily return percentage
+data['Daily Return %'] = data['Close'].pct_change() * 100
+
+# Function to calculate Bollinger Bands
+def calculate_bollinger_bands(prices, window=20, num_std_dev=2):
+    """Calculates Bollinger Bands for a given price series."""
+    middle_band = prices.rolling(window=window).mean()
+    rolling_std = prices.rolling(window=window).std()
+    upper_band = middle_band + (rolling_std * num_std_dev)
+    lower_band = middle_band - (rolling_std * num_std_dev)
+    return middle_band, upper_band, lower_band
+
+# Calculate Bollinger Bands for the daily data
+data['Middle Band'], data['Upper Band'], data['Lower Band'] = calculate_bollinger_bands(data['Close'])
+
+# Function to simulate slippage
+def apply_slippage(price, slippage_factor=0.001):
+    """Applies slippage to the given price."""
+    slippage = price * slippage_factor * (random.choice([-1, 1]))
+    return price + slippage
+
+# Function to calculate transaction costs
+def apply_transaction_costs(price, cost_percent=0.001):
+    """Applies transaction costs to the given price."""
+    transaction_cost = price * cost_percent
+    return price - transaction_cost
+
+# Function to simulate partial order execution
+def simulate_order_execution(price, fill_probability=1):
+    """Simulates order execution with the possibility of partial fill."""
+    if random.random() > fill_probability:
+        return price * random.uniform(0.5, 0.9)  # Partial fill
+    return price
+
+# Modify the Bollinger Bands strategy to include realistic trading conditions
+def bollinger_bands_strategy(data, slippage_factor=0.00, transaction_cost_percent=0.001, fill_probability=1):
+    entry_points = []
+    exit_points = []
+    holding_position = False
+
+    for i in range(1, len(data)):
+        close_price = data.loc[i, 'Close']
+        lower_band = data.loc[i, 'Lower Band']
+        upper_band = data.loc[i, 'Upper Band']
+        
+        if not holding_position and close_price < lower_band:
+            # Buy signal with slippage and transaction costs
+            adjusted_price = apply_slippage(close_price, slippage_factor)
+            adjusted_price = apply_transaction_costs(adjusted_price, transaction_cost_percent)
+            adjusted_price = simulate_order_execution(adjusted_price, fill_probability)
+            entry_points.append((data.loc[i, 'Date'], adjusted_price))
+            holding_position = True
+        
+        elif holding_position and close_price > upper_band:
+            # Sell signal with slippage and transaction costs
+            adjusted_price = apply_slippage(close_price, slippage_factor)
+            adjusted_price = apply_transaction_costs(adjusted_price, transaction_cost_percent)
+            adjusted_price = simulate_order_execution(adjusted_price, fill_probability)
+            exit_points.append((data.loc[i, 'Date'], adjusted_price))
+            holding_position = False
+
+    # Handle last holding position
+    if holding_position:
+        adjusted_price = apply_slippage(data.loc[len(data) - 1, 'Close'], slippage_factor)
+        adjusted_price = apply_transaction_costs(adjusted_price, transaction_cost_percent)
+        adjusted_price = simulate_order_execution(adjusted_price, fill_probability)
+        exit_points.append((data.loc[len(data) - 1, 'Date'], adjusted_price))
+
+    return entry_points, exit_points
+
+# Get entry and exit points for Bollinger Bands strategy
+bollinger_entry_points, bollinger_exit_points = bollinger_bands_strategy(data)
+bollinger_entry_df = pd.DataFrame(bollinger_entry_points, columns=['Date', 'Buy Price'])
+bollinger_exit_df = pd.DataFrame(bollinger_exit_points, columns=['Date', 'Sell Price'])
+bollinger_trade_df = pd.DataFrame({
+    'Buy Date': bollinger_entry_df['Date'],
+    'Buy Price': bollinger_entry_df['Buy Price'],
+    'Sell Date': bollinger_exit_df['Date'],
+    'Sell Price': bollinger_exit_df['Sell Price']
+})
+bollinger_trade_df['Percentage Change'] = (bollinger_trade_df['Sell Price'] - bollinger_trade_df['Buy Price']) / bollinger_trade_df['Buy Price'] * 100
+bollinger_total_percentage_increase = bollinger_trade_df['Percentage Change'].sum()
+
+# Plot the performance of the Bollinger Bands strategy
+def plot_bollinger_bands_performance(data, strategy_trades):
+    plt.figure(figsize=(14, 8))
+    plt.plot(data['Date'], data['Close'], label='Daily Close Price', linewidth=1)
+    plt.plot(data['Date'], data['Middle Band'], label='Middle Band', linestyle='--', linewidth=1)
+    plt.plot(data['Date'], data['Upper Band'], label='Upper Band', linestyle='--', linewidth=1)
+    plt.plot(data['Date'], data['Lower Band'], label='Lower Band', linestyle='--', linewidth=1)
+    
+    # Highlight buy and sell signals
+    for index, row in strategy_trades.iterrows():
+        buy_date = row['Buy Date']
+        buy_price = row['Buy Price']
+        sell_date = row['Sell Date']
+        sell_price = row['Sell Price']
+
+        # Plot buy signals
+        plt.plot(buy_date, buy_price, marker='^', color='green', markersize=10, label='Buy Signal' if index == 0 else "")
+
+        # Plot sell signals
+        plt.plot(sell_date, sell_price, marker='v', color='red', markersize=10, label='Sell Signal' if index == 0 else "")
+
+    plt.title('Bollinger Bands Strategy Performance for TATACONSUM.NS')
+    plt.xlabel('Date')
+    plt.ylabel('Price')
+    plt.legend()
+    plt.xticks(rotation=45)
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+# Plot performance for Bollinger Bands strategy
+plot_bollinger_bands_performance(data, bollinger_trade_df)
+
+# Print results
+print("Bollinger Bands Strategy Total Percentage Increase: {:.2f}%".format(bollinger_total_percentage_increase))
+
